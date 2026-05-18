@@ -142,6 +142,29 @@ jobs:
 
           cd ./wrt/ && echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
 
+      - name: Apply Source Patches
+        run: |
+          cd ./wrt/
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          apply_patch_dir() {
+            local dir="$1"
+            [ -d "$dir" ] || return 0
+            find "$dir" -maxdepth 1 -type f -name '*.patch' | sort | while read -r patch; do
+              echo "Applying $patch"
+              if grep -q '^Subject:' "$patch"; then
+                git am -3 "$patch"
+              else
+                git apply --check "$patch"
+                git apply "$patch"
+              fi
+            done
+          }
+
+          apply_patch_dir "$GITHUB_WORKSPACE/patches/common"
+          apply_patch_dir "$GITHUB_WORKSPACE/patches/$WRT_CONFIG"
+
       - name: Check Scripts
         run: |
           find ./ -maxdepth 3 -type f -iregex ".*\(txt\|sh\)$" -exec dos2unix {} \; -exec chmod +x {} \;

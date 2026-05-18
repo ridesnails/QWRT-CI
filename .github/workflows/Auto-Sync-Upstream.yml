@@ -1,0 +1,129 @@
+name: Auto-Sync-Upstream
+
+on:
+  schedule:
+    - cron: '0 19 * * *'
+  workflow_dispatch:
+    inputs:
+      TRIGGER_BUILD:
+        description: '同步成功后触发 Auto-Clean（将联动现有 workflow_run 编译）'
+        default: true
+        required: false
+        type: boolean
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+env:
+  UPSTREAM_OWNER: davidtall
+  UPSTREAM_REPO: DaeWRT-CI
+  UPSTREAM_BRANCH: main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compare with upstream
+        id: cmp
+        env:
+          GH_TOKEN: ${{ secrets.AUTOSYNC_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          INFO=$(gh api "repos/${{ github.repository }}/compare/${UPSTREAM_OWNER}:${UPSTREAM_BRANCH}...${{ github.repository_owner }}:main")
+          AHEAD=$(echo "$INFO" | jq -r '.ahead_by')
+          BEHIND=$(echo "$INFO" | jq -r '.behind_by')
+          UPSTREAM_SHA=$(gh api "repos/${UPSTREAM_OWNER}/${UPSTREAM_REPO}/commits/${UPSTREAM_BRANCH}" --jq '.sha')
+          echo "ahead=$AHEAD" >> $GITHUB_OUTPUT
+          echo "behind=$BEHIND" >> $GITHUB_OUTPUT
+          echo "upstream_sha=$UPSTREAM_SHA" >> $GITHUB_OUTPUT
+          echo "Status: ahead=$AHEAD, behind=$BEHIND, upstream HEAD=$UPSTREAM_SHA"
+
+      - name: Skip if up to date
+        if: steps.cmp.outputs.behind == '0'
+        run: echo "Already up to date with upstream"
+
+      - name: Merge upstream into main
+        id: merge
+        if: steps.cmp.outputs.behind != '0'
+        env:
+          GH_TOKEN: ${{ secrets.AUTOSYNC_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          RESPONSE=$(gh api -X POST "repos/${{ github.repository }}/merge-upstream" \
+            -f branch="main" \
+            2>&1)
+          STATUS=$?
+          set -e
+          echo "$RESPONSE"
+          if [ $STATUS -ne 0 ]; then
+            if echo "$RESPONSE" | grep -qi 'merge conflict'; then
+              echo "result=conflict" >> $GITHUB_OUTPUT
+            else
+              echo "result=error" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "result=success" >> $GITHUB_OUTPUT
+            MERGE_SHA=$(echo "$RESPONSE" | jq -r '.merge_commit_sha // .sha // empty')
+            echo "merge_sha=$MERGE_SHA" >> $GITHUB_OUTPUT
+            echo "Merge commit: $MERGE_SHA"
+          fi
+
+      - name: Open issue on conflict
+        if: steps.merge.outputs.result == 'conflict' && github.event.repository.has_issues == true
+        env:
+          GH_TOKEN: ${{ secrets.AUTOSYNC_PAT || secrets.GITHUB_TOKEN }}
+          UPSTREAM_SHA: ${{ steps.cmp.outputs.upstream_sha }}
+          AHEAD: ${{ steps.cmp.outputs.ahead }}
+          BEHIND: ${{ steps.cmp.outputs.behind }}
+        run: |
+          cat > /tmp/issue.md <<'BODY'
+          Auto-Sync 检测到与上游存在合并冲突，请本地解决：
+
+          ```
+          git remote add upstream https://github.com/${UPSTREAM_OWNER}/${UPSTREAM_REPO}.git
+          git fetch upstream ${UPSTREAM_BRANCH}
+          git checkout main
+          git merge upstream/${UPSTREAM_BRANCH}
+          # 解决冲突后
+          git push origin main
+          ```
+          BODY
+          UPSTREAM_OWNER="$UPSTREAM_OWNER" UPSTREAM_REPO="$UPSTREAM_REPO" UPSTREAM_BRANCH="$UPSTREAM_BRANCH" \
+            envsubst < /tmp/issue.md > /tmp/issue.final.md
+          echo "" >> /tmp/issue.final.md
+          echo "ahead=${AHEAD}, behind=${BEHIND}, upstream_sha=${UPSTREAM_SHA}" >> /tmp/issue.final.md
+          gh issue create \
+            --title "Auto-Sync: merge conflict with upstream@${UPSTREAM_SHA}" \
+            --body-file /tmp/issue.final.md || true
+
+      - name: Trigger Auto-Clean
+        if: steps.merge.outputs.result == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.AUTOSYNC_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          SHOULD_TRIGGER=true
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.TRIGGER_BUILD }}" = "false" ]; then
+            SHOULD_TRIGGER=false
+          fi
+          if [ "$SHOULD_TRIGGER" != 'true' ]; then
+            echo "Skip build trigger"
+            exit 0
+          fi
+          gh workflow run Auto-Clean.yml --repo ${{ github.repository }}
+          echo "Auto-Clean triggered"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Auto-Sync Summary"
+            echo "- Upstream:    \`${UPSTREAM_OWNER}/${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\`"
+            echo "- Upstream SHA: ${{ steps.cmp.outputs.upstream_sha }}"
+            echo "- ahead/behind: ${{ steps.cmp.outputs.ahead }} / ${{ steps.cmp.outputs.behind }}"
+            echo "- Merge result: ${{ steps.merge.outputs.result || 'skipped' }}"
+            if [ -n "${{ steps.merge.outputs.merge_sha }}" ]; then
+              echo "- Merge commit: ${{ steps.merge.outputs.merge_sha }}"
+            fi
+            echo "- Trigger repo: ${{ github.repository }}"
+          } >> $GITHUB_STEP_SUMMARY
