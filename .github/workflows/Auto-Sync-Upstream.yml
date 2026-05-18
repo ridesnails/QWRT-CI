@@ -113,6 +113,24 @@ jobs:
           gh workflow run Auto-Clean.yml --repo ${{ github.repository }}
           echo "Auto-Clean triggered"
 
+      - name: Trigger build workflows directly
+        if: steps.merge.outputs.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.TRIGGER_BUILD)
+        env:
+          GH_TOKEN: ${{ secrets.AUTOSYNC_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          SHOULD_TRIGGER=true
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.TRIGGER_BUILD }}" = "false" ]; then
+            SHOULD_TRIGGER=false
+          fi
+          if [ "$SHOULD_TRIGGER" != 'true' ]; then
+            echo "Skip direct build dispatch"
+            exit 0
+          fi
+          for wf in QCA-6.12-LiBwrt.yml QCA-6.12-VIKINGYFY.yml QCA-6.18-VIKINGYFY.yml; do
+            gh workflow run "$wf" --repo ${{ github.repository }}
+            echo "Triggered $wf"
+          done
+
       - name: Summary
         if: always()
         run: |
