@@ -98,7 +98,7 @@ jobs:
             --body-file /tmp/issue.final.md || true
 
       - name: Trigger Auto-Clean
-        if: steps.merge.outputs.result == 'success'
+        if: steps.merge.outputs.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.TRIGGER_BUILD)
         env:
           GH_TOKEN: ${{ secrets.AUTOSYNC_PAT || secrets.GITHUB_TOKEN }}
         run: |
