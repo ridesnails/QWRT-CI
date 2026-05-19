@@ -211,6 +211,56 @@ jobs:
           
           generate_config && cat .config
           
+          mkdir -p ./files
+          if [ -d "$GITHUB_WORKSPACE/files" ]; then
+            mkdir -p ./files
+            cp -a "$GITHUB_WORKSPACE/files/." ./files/
+          fi
+
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq is required but not found" >&2
+            exit 1
+          fi
+
+          TARGET_ARCH_PACKAGES=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\([^"]*\)"$/\1/p' .config | head -n 1)
+          if [ -z "$TARGET_ARCH_PACKAGES" ]; then
+            echo "CONFIG_TARGET_ARCH_PACKAGES not found in .config" >&2
+            exit 1
+          fi
+
+          case "$TARGET_ARCH_PACKAGES" in
+            aarch64_generic) SINGBOX_ARCH=arm64 ;;
+            x86_64) SINGBOX_ARCH=amd64 ;;
+            *)
+              echo "Unsupported sing-box release arch mapping: $TARGET_ARCH_PACKAGES" >&2
+              exit 1
+              ;;
+          esac
+
+          SINGBOX_URL=$(curl -fsSL https://api.github.com/repos/reF1nd/sing-box-releases/releases | jq -r --arg arch "$SINGBOX_ARCH" '
+            map(select(.draft | not))
+            | map(.assets[]? | select(.name | test("^sing-box-.*-linux-" + $arch + "-musl\\.tar\\.gz$")) | .browser_download_url)
+            | .[0] // empty
+          ')
+          if [ -z "$SINGBOX_URL" ]; then
+            echo "Unable to locate reF1nd sing-box release for $SINGBOX_ARCH" >&2
+            exit 1
+          fi
+
+          rm -rf ./.tmp-sing-box
+          mkdir -p ./.tmp-sing-box ./files/usr/bin
+          curl -fL "$SINGBOX_URL" -o ./.tmp-sing-box/sing-box.tar.gz
+          tar -xzf ./.tmp-sing-box/sing-box.tar.gz -C ./.tmp-sing-box
+
+          SINGBOX_BIN=$(find ./.tmp-sing-box -type f -name sing-box | head -n 1)
+          if [ -z "$SINGBOX_BIN" ]; then
+            echo "sing-box binary not found in downloaded archive" >&2
+            exit 1
+          fi
+
+          install -m 0755 "$SINGBOX_BIN" ./files/usr/bin/sing-box
+          ls -l ./files/usr/bin/sing-box
+          
           $GITHUB_WORKSPACE/Scripts/Settings.sh
 
           make defconfig -j$(nproc) && make clean -j$(nproc)
