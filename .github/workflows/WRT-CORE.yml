@@ -233,7 +233,7 @@ jobs:
           fi
 
           case "$TARGET_ARCH_PACKAGES" in
-            aarch64_generic) SINGBOX_ARCH=arm64 ;;
+            aarch64_*|aarch64) SINGBOX_ARCH=arm64 ;;
             x86_64) SINGBOX_ARCH=amd64 ;;
             *)
               echo "Unsupported sing-box release arch mapping: $TARGET_ARCH_PACKAGES" >&2
