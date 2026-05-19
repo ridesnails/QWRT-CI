@@ -222,6 +222,10 @@ jobs:
             exit 1
           fi
 
+          $GITHUB_WORKSPACE/Scripts/Settings.sh
+
+          make defconfig -j$(nproc)
+
           TARGET_ARCH_PACKAGES=$(sed -n 's/^CONFIG_TARGET_ARCH_PACKAGES="\([^"]*\)"$/\1/p' .config | head -n 1)
           if [ -z "$TARGET_ARCH_PACKAGES" ]; then
             echo "CONFIG_TARGET_ARCH_PACKAGES not found in .config" >&2
@@ -260,10 +264,8 @@ jobs:
 
           install -m 0755 "$SINGBOX_BIN" ./files/usr/bin/sing-box
           ls -l ./files/usr/bin/sing-box
-          
-          $GITHUB_WORKSPACE/Scripts/Settings.sh
 
-          make defconfig -j$(nproc) && make clean -j$(nproc)
+          make clean -j$(nproc)
 
       - name: Download Packages
         if: env.WRT_TEST != 'true'
