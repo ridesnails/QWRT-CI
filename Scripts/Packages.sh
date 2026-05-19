@@ -83,6 +83,8 @@ UPDATE_PACKAGE "luci-app-lucky" "sirpdboy/luci-app-lucky" "main"
 UPDATE_PACKAGE "luci-app-tinyfilemanager" "muink/luci-app-tinyfilemanager" "master"
 UPDATE_PACKAGE "natmapt" "muink/openwrt-natmapt" "master" "name"
 UPDATE_PACKAGE "luci-app-natmapt" "muink/luci-app-natmapt" "master"
+UPDATE_PACKAGE "syncthing" "openwrt/packages" "master" "pkg"
+UPDATE_PACKAGE "luci-app-syncthing" "immortalwrt/luci" "master" "pkg"
 #更新软件包版本
 UPDATE_VERSION() {
 	local PKG_NAME=$1
